@@ -1,2 +1,165 @@
 # BaseDeDatosNoRelacionales-ProyectoFinal
-El proyecto tiene como objetivo diseñar e implementar una arquitectura de datos no relacional y que este distribuida de extremo a extremo; en donde tenemos q demostrar la competencia en el despliegue de sistemas de control de accesos, garantizando la integridad y seguridad de la información
+# Descripción del Stream de Datos: Wikimedia RecentChange
+
+## 1. Resumen
+
+El stream `recentchange` es un flujo de datos en tiempo real que transmite todos los cambios realizados en los proyectos de Wikimedia, como Wikipedia, Wikidata, Wikimedia Commons y otros. Cada evento representa una acción que ocurre en una página: por ejemplo, una edición, creación de página, categorización o registro de acciones administrativas.
+
+Los eventos se publican continuamente mediante un servicio llamado **EventStreams**, que envía datos estructurados en formato **JSON** a través del protocolo **Server-Sent Events (SSE)**.
+
+Cada registro del stream contiene información como:
+
+- Usuario que realizó el cambio
+- Página afectada
+- Tipo de acción (edición, creación, log, etc.)
+- Comentario del cambio
+- Identificadores de revisiones
+- Longitud del contenido antes y después
+- Marca de tiempo del evento
+- Información técnica del servidor y del wiki
+
+Este stream permite observar la actividad global de edición de Wikipedia en tiempo real, lo que resulta útil para:
+
+- análisis de actividad
+- monitoreo de bots
+- detección de vandalismo
+- investigación académica
+- aplicaciones de procesamiento de datos en streaming
+
+---
+
+## 2. Origen y Autoría
+
+El stream es generado por los sistemas de **MediaWiki**, el software que gestiona Wikipedia y otros proyectos de Wikimedia.
+
+La entidad responsable de recolectar y publicar estos datos es:
+
+**Wikimedia Foundation (WMF)**
+
+Esta organización sin fines de lucro opera los servidores de Wikipedia y mantiene la infraestructura que genera los eventos de cambios recientes.
+
+### Infraestructura técnica
+
+El flujo de datos funciona de la siguiente manera:
+
+1. Cuando ocurre una modificación en una página de MediaWiki, el sistema registra el evento.
+2. Ese evento se envía a la plataforma de eventos.
+3. Los eventos se almacenan y distribuyen mediante **Apache Kafka**.
+4. El servicio **EventStreams** publica esos eventos en tiempo real a través de HTTP.
+
+---
+
+## 3. Diccionario de Datos (Atributos del evento)
+
+Un evento típico del stream contiene atributos como los siguientes:
+
+| Atributo | Significado |
+|--------|-------------|
+| `$schema` | Identificador del esquema JSON que define la estructura del evento |
+| `meta` | Objeto con metadatos técnicos del evento |
+| `meta.uri` | URL relacionada con el cambio |
+| `meta.id` | Identificador único del evento |
+| `meta.dt` | Fecha y hora del evento |
+| `meta.stream` | Nombre del stream (`mediawiki.recentchange`) |
+| `meta.domain` | Dominio del sitio donde ocurrió el cambio |
+| `id` | Identificador del cambio dentro del sistema |
+| `type` | Tipo de cambio (`edit`, `new`, `log`, `categorize`, `external`) |
+| `namespace` | Espacio de nombres de la página |
+| `title` | Título de la página modificada |
+| `comment` | Comentario del editor sobre el cambio |
+| `timestamp` | Momento en que ocurrió la modificación |
+| `user` | Nombre del usuario que realizó la edición |
+| `bot` | Indica si el cambio fue realizado por un bot |
+| `server_url` | URL del servidor del wiki |
+| `server_name` | Nombre del servidor |
+| `server_script_path` | Ruta del script de MediaWiki |
+| `wiki` | Identificador interno del wiki (por ejemplo, `enwiki`) |
+
+---
+
+## 4. Variables Cuantitativas (Numéricas)
+
+Los atributos numéricos del stream incluyen:
+
+- `id`
+- `namespace`
+- `timestamp`
+- `partition`
+- `offset`
+- `revision IDs` (cuando están presentes)
+- `old_len` y `new_len` (longitud del contenido antes y después)
+
+Estas variables permiten realizar análisis estadísticos como:
+
+- frecuencia de ediciones
+- crecimiento de páginas
+- actividad por periodos
+- volumen de cambios por wiki
+
+---
+
+## 5. Variables Cualitativas (Categorías)
+
+Las variables categóricas incluyen:
+
+- `type` → tipo de cambio (`edit`, `new`, `log`, etc.)
+- `user` → nombre del usuario
+- `title` → página afectada
+- `wiki` → proyecto específico
+- `server_name`
+- `domain`
+- `stream`
+- `bot` (`true` / `false`)
+
+Estas variables describen características o etiquetas del evento en lugar de valores numéricos.
+
+---
+
+## 6. Texto No Estructurado
+
+Existen campos con texto libre o semi-estructurado, principalmente:
+
+- `comment`
+- `parsedcomment`
+
+Estos campos contienen el mensaje que el editor escribió al realizar el cambio, por ejemplo:
+
+- explicación de la modificación
+- referencias a secciones editadas
+- descripción del cambio
+
+Este tipo de texto puede usarse para **análisis de lenguaje natural (NLP)** o **detección automática de vandalismo**.
+
+---
+
+## 7. Series Temporales
+
+El stream incluye varios atributos temporales que permiten analizar la actividad en el tiempo:
+
+| Atributo | Descripción |
+|--------|-------------|
+| `timestamp` | instante en que ocurrió la edición |
+| `meta.dt` | fecha y hora de emisión del evento |
+| `meta.offset` | posición temporal dentro del stream |
+
+Estas variables permiten construir:
+
+- series de actividad por minuto u hora
+- patrones diarios de edición
+- picos de actividad ante eventos noticiosos
+- análisis de comportamiento de usuarios
+
+---
+
+## Conclusión
+
+El stream **Wikimedia RecentChange** es una fuente de datos abierta y en tiempo real que registra cada modificación realizada en los proyectos de Wikimedia.
+
+Publicado por la **Wikimedia Foundation**, este flujo permite acceder a información detallada sobre ediciones, usuarios, páginas y tiempos de actividad.
+
+Debido a su estructura en formato **JSON** y a su naturaleza continua, el stream es ampliamente utilizado en aplicaciones de:
+
+- análisis de datos en tiempo real
+- monitoreo de actividad en Wikipedia
+- investigación académica
+- sistemas de procesamiento de streams.
