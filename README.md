@@ -49,7 +49,7 @@ El flujo de datos funciona de la siguiente manera:
 
 ---
 
-## 3. Diccionario de Datos (Atributos del evento)
+## 3. Diccionario de Datos
 
 Un evento típico del stream contiene atributos como los siguientes:
 
