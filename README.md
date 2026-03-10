@@ -174,3 +174,55 @@ Estas variables permiten construir:
 - patrones diarios de edición
 - picos de actividad ante eventos noticiosos
 - análisis de comportamiento de usuarios
+
+---
+
+## 8. Consideraciones Éticas
+
+El procesamiento del stream **Wikimedia RecentChange** implica ciertas consideraciones éticas relacionadas con el uso responsable de los datos.
+
+### Privacidad y datos sensibles
+
+Aunque los datos del stream son **públicos**, algunos atributos pueden contener información potencialmente sensible, como:
+
+- `user`: nombre del usuario que realizó la edición
+- `comment`: mensaje escrito por el editor
+- direcciones IP en el caso de usuarios no registrados
+
+El uso de estos datos debe respetar las políticas de privacidad de Wikimedia y evitar la identificación o exposición indebida de usuarios individuales.
+
+### Riesgos de sesgo
+
+El análisis de los datos puede generar **interpretaciones sesgadas** si no se considera el contexto en el que se producen las ediciones. Por ejemplo:
+
+- algunas comunidades de editores pueden estar más representadas que otras
+- ciertos idiomas o wikis pueden tener mayor actividad
+- los bots generan grandes volúmenes de cambios que pueden distorsionar métricas de participación humana
+
+Por ello, es importante diferenciar entre **ediciones humanas y automatizadas** al realizar análisis.
+
+### Uso responsable de los datos
+
+Los datos del stream pueden utilizarse para aplicaciones como:
+
+- monitoreo de actividad
+- análisis académico
+- investigación en ciencia de datos
+
+Sin embargo, deben evitarse usos que puedan:
+
+- acosar o rastrear usuarios individuales
+- generar perfiles personales sin consentimiento
+- manipular información o crear herramientas de vigilancia indebida
+
+### Transparencia y reproducibilidad
+
+Dado que los datos provienen de una plataforma abierta, se recomienda mantener prácticas de **transparencia en el análisis**, documentando:
+
+- los métodos utilizados
+- los filtros aplicados
+- las limitaciones del dataset
+
+Esto contribuye a un uso ético y responsable de la información disponible en el stream.
+
+---
