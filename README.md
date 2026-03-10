@@ -1,6 +1,32 @@
 # BaseDeDatosNoRelacionales-ProyectoFinal
 # Descripción del Stream de Datos: Wikimedia RecentChange
 
+                                                                                                                                                                                                             
+  ```mermaid                                                                                                                                                                                                   
+  flowchart LR                                                                                                                                                                                                 
+      A[🌐 Wikimedia Foundation] -->|Server-Sent Events SSE| B[📡 EventStreams]                                                                                                                                
+      B -->|JSON Events ~3000/min| C[Apache Kafka]                                                                                                                                                             
+      C -->|Stream Processing| D[(Apache Cassandra)]                                                                                                                                                           
+      D -->|Query| E[📊 Análisis de Datos]                                                                                                                                                                     
+                                                                                                                                                                                                               
+      subgraph Fuente                                                                                                                                                                                          
+          A                                                                                                                                                                                                    
+          B                                                                                                                                                                                                    
+      end         
+
+      subgraph Ingesta
+          C
+      end                                                                                                                                                                                                      
+   
+      subgraph Almacenamiento                                                                                                                                                                                  
+          D       
+      end                                                                                                                                                                                                      
+                  
+      subgraph Resultados
+          E
+      end
+  ```               
+
 ## 1. Resumen
 
 El stream `recentchange` es un flujo de datos en tiempo real que transmite todos los cambios realizados en los proyectos de Wikimedia, como Wikipedia, Wikidata, Wikimedia Commons y otros. Cada evento representa una acción que ocurre en una página: por ejemplo, una edición, creación de página, categorización o registro de acciones administrativas.
