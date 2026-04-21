@@ -27,6 +27,51 @@
       end
   ```               
 
+# Proyecto Final - Equipo 1
+
+## Bases de Datos No Relacionales
+Proyecto enfocado en el diseño e implementación de una arquitectura de datos no relacional y distribuida de extremo a extremo, utilizando un stream de datos real.
+
+## Stream seleccionado
+Se utilizará el stream **Wikimedia EventStreams - RecentChange**, el cual genera eventos en tiempo real sobre cambios recientes en páginas de Wikimedia.
+
+## Arquitectura propuesta
+El flujo general del sistema es el siguiente:
+
+Wikimedia EventStreams → Kafka → Cassandra → Spark → Consultas analíticas
+
+## Tecnologías utilizadas
+
+### Apache Kafka
+Se utiliza como capa de mensajería para recibir y desacoplar el flujo de eventos en tiempo real.
+
+### Apache Cassandra
+Se utiliza como base de datos NoSQL de ingesta y operación, optimizada para escritura rápida, alta disponibilidad y escalabilidad horizontal.
+
+### Apache Spark
+Se utiliza como motor de procesamiento analítico para limpieza, transformación y preparación de consultas agregadas.
+
+## Etapa 2: Infraestructura y configuración
+En esta etapa se definió la infraestructura base del proyecto:
+
+- Kafka como sistema de ingesta y buffer de eventos
+- Cassandra como capa operativa de verdad
+- Spark como capa analítica (OLAP)
+- Scripts y archivos de configuración para despliegue
+- Documentación de arquitectura y decisiones CAP
+- Archivos de ejemplo para control de accesos
+
+## Cómo levantar la infraestructura
+
+```bash
+docker-compose up -d
+
+## Seguridad y control de accesos
+
+Para la etapa 2 se incluye un archivo `roles.cql` que documenta la estrategia de control de accesos en Cassandra mediante roles y permisos.
+
+Debido a que el contenedor base de Cassandra se encuentra en configuración por defecto, la autenticación por usuario/contraseña no está habilitada todavía. Por ello, los roles se incluyen como parte de la documentación de seguridad y como base para una configuración futura más estricta.
+
 ## 1. Resumen
 
 El stream `recentchange` es un flujo de datos en tiempo real que transmite todos los cambios realizados en los proyectos de Wikimedia, como Wikipedia, Wikidata, Wikimedia Commons y otros. Cada evento representa una acción que ocurre en una página: por ejemplo, una edición, creación de página, categorización o registro de acciones administrativas.
@@ -226,3 +271,4 @@ Dado que los datos provienen de una plataforma abierta, se recomienda mantener p
 Esto contribuye a un uso ético y responsable de la información disponible en el stream.
 
 ---
+
