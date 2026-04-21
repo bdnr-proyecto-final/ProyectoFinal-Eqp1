@@ -93,6 +93,31 @@ Debido a que el contenedor base de Cassandra se encuentra en configuración por 
 
 De igual forma, el archivo `kafka/acl.sh` documenta la estrategia de control de accesos para Kafka mediante ACLs en un entorno con seguridad habilitada.
 
+## Decisiones basadas en el teorema CAP
+
+La arquitectura del proyecto fue diseñada considerando el teorema CAP, el cual establece que en un sistema distribuido no es posible garantizar simultáneamente Consistencia (C), Disponibilidad (A) y Tolerancia a Particiones (P).
+
+En este caso, se priorizan:
+
+- **Disponibilidad (A)**
+- **Tolerancia a Particiones (P)**
+
+### Justificación
+
+Dado que el sistema procesa eventos en tiempo real provenientes de un stream externo (Wikimedia EventStreams), es fundamental que el sistema continúe operando incluso ante fallos parciales de red o de nodos.
+
+Para ello, se eligió Apache Cassandra como base de datos NoSQL, ya que está diseñada para entornos distribuidos y permite mantener alta disponibilidad mediante replicación, aceptando un modelo de **consistencia eventual**.
+
+Esto implica que:
+
+- El sistema puede seguir recibiendo y almacenando eventos aunque existan fallos parciales.
+- No se requiere consistencia inmediata para cada evento.
+- La consolidación y análisis estructurado de los datos se realiza posteriormente en la capa analítica (Apache Spark).
+
+### Conclusión
+
+La elección de priorizar AP (Availability + Partition Tolerance) se alinea con la naturaleza distribuida y en tiempo real del proyecto, permitiendo garantizar continuidad operativa y escalabilidad.
+
 ## 8. Descripción del stream de datos: Wikimedia RecentChange
 
 ### 8.1 Resumen
