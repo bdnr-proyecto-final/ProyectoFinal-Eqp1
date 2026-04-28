@@ -4,22 +4,26 @@
 Proyecto enfocado en el diseño e implementación de una arquitectura de datos no relacional y distribuida de extremo a extremo, utilizando un stream de datos real.
 
 ## Índice
+
 - [1. Descripción general del proyecto](#1-descripción-general-del-proyecto)
+
 - [2. Stream seleccionado](#2-stream-seleccionado)
+
 - [3. Arquitectura propuesta](#3-arquitectura-propuesta)
+
 - [4. Tecnologías utilizadas](#4-tecnologías-utilizadas)
+
 - [5. Etapa 2: Infraestructura y configuración](#5-etapa-2-infraestructura-y-configuración)
-- [6. Cómo levantar la infraestructura](#6-cómo-levantar-la-infraestructura)
-- [7. Seguridad y control de accesos](#7-seguridad-y-control-de-accesos)
-- [8. Descripción del stream de datos: Wikimedia RecentChange](#8-descripción-del-stream-de-datos-wikimedia-recentchange)
-  - [8.1 Resumen](#81-resumen)
-  - [8.2 Origen y autoría](#82-origen-y-autoría)
-  - [8.3 Diccionario de datos](#83-diccionario-de-datos)
-  - [8.4 Variables cuantitativas](#84-variables-cuantitativas)
-  - [8.5 Variables cualitativas](#85-variables-cualitativas)
-  - [8.6 Texto no estructurado](#86-texto-no-estructurado)
-  - [8.7 Series temporales](#87-series-temporales)
-  - [8.8 Consideraciones éticas](#88-consideraciones-éticas)
+
+- [6. Etapa 3: Pipeline de datos en tiempo real](#6-etapa-3-pipeline-de-datos-en-tiempo-real)
+
+- [7. Cómo levantar la infraestructura](#7-cómo-levantar-la-infraestructura)
+
+- [8. Seguridad y control de accesos](#8-seguridad-y-control-de-accesos)
+
+- [9. Descripción del stream de datos: Wikimedia RecentChange](#9-descripción-del-stream-de-datos-wikimedia-recentchange)
+
+---
 
 ## 1. Descripción general del proyecto
 El proyecto tiene como objetivo diseñar e implementar una arquitectura de datos no relacional y distribuida de extremo a extremo, a partir de un stream de datos real. La solución contempla una capa de ingesta, una capa operativa de almacenamiento y una capa analítica para el procesamiento posterior de los eventos.
@@ -80,13 +84,41 @@ En esta etapa se definió la infraestructura base del proyecto:
 - Documentación de arquitectura y decisiones CAP
 - Archivos de ejemplo para control de accesos
 
-## 6. Cómo levantar la infraestructura
+## 6. Etapa 3: Pipeline de datos en tiempo real 
+En esta etapa se implemtó el flujo completo de ingestión y almacenamiento de datos en tiempo real.
 
-```bash
+## Flujo del sistema
+Wikimedia → Kafka → Cassandra
+
+## Componentes
+
+Productor (Wikimedia → Kafka)
+Script: consumers/wikimedia_to_kafka.py
+
+* Consume eventos en tiempo real desde Wikimedia
+* Convierte a JSON
+* Envía a Kafka
+
+Consumidor (Kafka → Cassandra)
+Script: consumers/kafka_to_cassandra.py
+
+* Consume mensajes de Kafka
+* Transforma los datos
+* Inserta en Cassandra
+
+## Ejecución del Pipeline:
+
 docker compose up -d
-```
 
-## 7. Seguridad y control de accesos
+python consumers/wikimedia_to_kafka.py y python consumers/kafka_to_cassandra.py en terminales diferentes
+ 
+docker exec cassandra cqlsh -e "SELECT COUNT(*) FROM wikimedia.recent_changes;"
+
+## 7. Cómo levantar la infraestructura:
+
+docker compose up -d
+
+## 8. Seguridad y control de accesos
 Para la etapa 2 se incluye un archivo `roles.cql` que documenta la estrategia de control de accesos en Cassandra mediante roles y permisos.
 
 Debido a que el contenedor base de Cassandra se encuentra en configuración por defecto, la autenticación por usuario/contraseña no está habilitada todavía. Por ello, los roles se incluyen como parte de la documentación de seguridad y como base para una configuración futura más estricta.
@@ -118,9 +150,9 @@ Esto implica que:
 
 La elección de priorizar AP (Availability + Partition Tolerance) se alinea con la naturaleza distribuida y en tiempo real del proyecto, permitiendo garantizar continuidad operativa y escalabilidad.
 
-## 8. Descripción del stream de datos: Wikimedia RecentChange
+## 9. Descripción del stream de datos: Wikimedia RecentChange
 
-### 8.1 Resumen
+### 9.1 Resumen
 El stream `recentchange` es un flujo de datos en tiempo real que transmite todos los cambios realizados en los proyectos de Wikimedia, como Wikipedia, Wikidata, Wikimedia Commons y otros. Cada evento representa una acción que ocurre en una página: por ejemplo, una edición, creación de página, categorización o registro de acciones administrativas.
 
 Los eventos se publican continuamente mediante un servicio llamado **EventStreams**, que envía datos estructurados en formato **JSON** a través del protocolo **Server-Sent Events (SSE)**.
@@ -144,7 +176,7 @@ Este stream permite observar la actividad global de edición de Wikipedia en tie
 - investigación académica
 - aplicaciones de procesamiento de datos en streaming
 
-### 8.2 Origen y autoría
+### 9.2 Origen y autoría
 El stream es generado por los sistemas de **MediaWiki**, el software que gestiona Wikipedia y otros proyectos de Wikimedia.
 
 La entidad responsable de recolectar y publicar estos datos es:
@@ -161,7 +193,7 @@ El flujo de datos funciona de la siguiente manera:
 3. Los eventos se almacenan y distribuyen mediante **Apache Kafka**.
 4. El servicio **EventStreams** publica esos eventos en tiempo real a través de HTTP.
 
-### 8.3 Diccionario de datos
+### 9.3 Diccionario de datos
 Un evento típico del stream contiene atributos como los siguientes:
 
 | Atributo | Significado |
@@ -186,7 +218,7 @@ Un evento típico del stream contiene atributos como los siguientes:
 | `server_script_path` | Ruta del script de MediaWiki |
 | `wiki` | Identificador interno del wiki (por ejemplo, `enwiki`) |
 
-### 8.4 Variables cuantitativas
+### 9.4 Variables cuantitativas
 Los atributos numéricos del stream incluyen:
 
 - `id`
@@ -204,7 +236,7 @@ Estas variables permiten realizar análisis estadísticos como:
 - actividad por periodos
 - volumen de cambios por wiki
 
-### 8.5 Variables cualitativas
+### 9.5 Variables cualitativas
 Las variables categóricas incluyen:
 
 - `type` → tipo de cambio (`edit`, `new`, `log`, etc.)
@@ -218,7 +250,7 @@ Las variables categóricas incluyen:
 
 Estas variables describen características o etiquetas del evento en lugar de valores numéricos.
 
-### 8.6 Texto no estructurado
+### 9.6 Texto no estructurado
 Existen campos con texto libre o semi-estructurado, principalmente:
 
 - `comment`
@@ -232,7 +264,7 @@ Estos campos contienen el mensaje que el editor escribió al realizar el cambio,
 
 Este tipo de texto puede usarse para **análisis de lenguaje natural (NLP)** o **detección automática de vandalismo**.
 
-### 8.7 Series temporales
+### 9.7 Series temporales
 El stream incluye varios atributos temporales que permiten analizar la actividad en el tiempo:
 
 | Atributo | Descripción |
@@ -248,7 +280,7 @@ Estas variables permiten construir:
 - picos de actividad ante eventos noticiosos
 - análisis de comportamiento de usuarios
 
-### 8.8 Consideraciones éticas
+### 9.8 Consideraciones éticas
 El procesamiento del stream **Wikimedia RecentChange** implica ciertas consideraciones éticas relacionadas con el uso responsable de los datos.
 
 #### Privacidad y datos sensibles
