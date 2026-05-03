@@ -19,6 +19,7 @@ USER_AGENT = os.getenv(
     "USER_AGENT",
     "ProyectoFinal-Eqp1/1.0 (contacto: equipo1@itam.mx)",
 )
+FLUSH_EVERY = int(os.getenv("KAFKA_FLUSH_EVERY", "100"))
 
 HEADERS = {
     "User-Agent": USER_AGENT,
@@ -62,6 +63,7 @@ def stream_events():
 
 def main():
     producer = None
+    sent_count = 0
 
     try:
         producer = create_producer()
@@ -83,14 +85,15 @@ def main():
                     continue
 
                 producer.send(TOPIC_NAME, payload)
-                producer.flush()
+                sent_count += 1
 
-                print(
-                    f"[SEND] Evento enviado | "
-                    f"title={payload.get('title')!r} | "
-                    f"user={payload.get('user')!r} | "
-                    f"type={payload.get('type')!r}"
-                )
+                if sent_count % FLUSH_EVERY == 0:
+                    producer.flush()
+                    print(
+                        f"[SEND] {sent_count} eventos enviados | "
+                        f"ultimo_title={payload.get('title')!r} | "
+                        f"ultimo_type={payload.get('type')!r}"
+                    )
 
             except json.JSONDecodeError:
                 print("[WARN] Evento recibido no es JSON válido.")
@@ -103,6 +106,7 @@ def main():
         print(f"[ERROR] Ocurrió un error en Wikimedia → Kafka: {type(exc).__name__}: {exc}")
     finally:
         if producer is not None:
+            producer.flush()
             producer.close()
             print("[KAFKA] Productor cerrado.")
 
