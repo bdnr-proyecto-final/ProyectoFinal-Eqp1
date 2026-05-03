@@ -29,6 +29,30 @@ services:
       CASSANDRA_CLUSTER_NAME: wikimedia-cluster
       CASSANDRA_DC: dc1
       CASSANDRA_RACK: rack1
+    volumes:
+      - cassandra_data:/var/lib/cassandra
+    healthcheck:
+      test: ["CMD-SHELL", "cqlsh localhost 9042 -e 'DESCRIBE KEYSPACES'"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 40s
+
+  cassandra-init:
+    image: cassandra:4.1
+    container_name: cassandra-init
+    depends_on:
+      cassandra:
+        condition: service_healthy
+    environment:
+      CASSANDRA_HOST: cassandra
+      CASSANDRA_PORT: 9042
+      SCHEMA_FILE: /init/schema.cql
+    volumes:
+      - ./cassandra/schema.cql:/init/schema.cql:ro
+      - ./cassandra/init.sh:/init/init.sh:ro
+    entrypoint: ["bash", "/init/init.sh"]
+    restart: "no"
 
   spark-master:
     image: apache/spark:4.0.2
@@ -44,3 +68,6 @@ services:
     depends_on:
       - spark-master
     command: ["/opt/spark/bin/spark-class", "org.apache.spark.deploy.worker.Worker", "spark://spark-master:7077"]
+
+volumes:
+  cassandra_data:
