@@ -1,41 +1,54 @@
-
-
 import json
+import hashlib
 import os
 import time
-import uuid
 from datetime import datetime, timezone
 
 from cassandra.cluster import Cluster
 from kafka import KafkaConsumer
+from kafka.structs import OffsetAndMetadata, TopicPartition
 
 
 KAFKA_HOST = os.getenv("KAFKA_HOST", "localhost")
 KAFKA_PORT = os.getenv("KAFKA_PORT", "9092")
 TOPIC_NAME = os.getenv("TOPIC_NAME", "wikimedia.recentchange")
+CASSANDRA_CONSUMER_GROUP_ID = os.getenv(
+    "KAFKA_CONSUMER_GROUP_ID", "wikimedia-cassandra-consumer"
+)
+KAFKA_AUTO_OFFSET_RESET = os.getenv("KAFKA_AUTO_OFFSET_RESET", "latest")
 CASSANDRA_HOST = os.getenv("CASSANDRA_HOST", "127.0.0.1")
 CASSANDRA_PORT = int(os.getenv("CASSANDRA_PORT", "9042"))
 KEYSPACE = os.getenv("KEYSPACE", "wikimedia")
-TABLE_NAME = os.getenv("TABLE_NAME", "recent_changes")
+TABLE_NAME = "recent_changes_raw"
+CONNECT_MAX_RETRIES = int(os.getenv("CASSANDRA_CONNECT_MAX_RETRIES", "10"))
+CONNECT_RETRY_WAIT_SECONDS = int(os.getenv("CASSANDRA_CONNECT_RETRY_WAIT_SECONDS", "5"))
+INSERT_MAX_RETRIES = int(os.getenv("CASSANDRA_INSERT_MAX_RETRIES", "3"))
+INSERT_RETRY_WAIT_SECONDS = int(
+    os.getenv("CASSANDRA_INSERT_RETRY_WAIT_SECONDS", "2")
+)
+PROGRESS_EVERY = 100
 
 
 INSERT_QUERY = f"""
 INSERT INTO {KEYSPACE}.{TABLE_NAME} (
-    id,
+    wiki,
+    event_date,
+    event_hour,
+    timestamp_event,
+    source_event_id,
     title,
     user_name,
-    type,
-    wiki,
+    change_type,
     bot,
     server_name,
     comment,
-    timestamp_event,
-    parsed_date
-) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+    raw_json
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
-SELECT_COUNT_QUERY = f"SELECT COUNT(*) FROM {KEYSPACE}.{TABLE_NAME};"
+class InvalidEventError(ValueError):
+    """Señala un evento que no puede persistirse de forma segura."""
 
 
 def parse_timestamp(value):
@@ -49,7 +62,7 @@ def parse_timestamp(value):
         return None
 
 
-def connect_to_cassandra(max_retries=10, wait_seconds=5):
+def connect_to_cassandra(max_retries=CONNECT_MAX_RETRIES, wait_seconds=CONNECT_RETRY_WAIT_SECONDS):
     """Intenta conectarse a Cassandra con reintentos."""
     cluster = Cluster([CASSANDRA_HOST], port=CASSANDRA_PORT)
 
@@ -68,74 +81,131 @@ def connect_to_cassandra(max_retries=10, wait_seconds=5):
     raise ConnectionError("No fue posible conectarse a Cassandra.")
 
 
+def prepare_insert_statement(session):
+    """Prepara la insercion hacia la tabla raw."""
+    statement = session.prepare(INSERT_QUERY)
+    print(f"[CASSANDRA] Prepared statement listo para {KEYSPACE}.{TABLE_NAME}.")
+    return statement
+
+
 def create_kafka_consumer():
     """Crea el consumidor de Kafka."""
     consumer = KafkaConsumer(
         TOPIC_NAME,
         bootstrap_servers=f"{KAFKA_HOST}:{KAFKA_PORT}",
-        auto_offset_reset="latest",
-        enable_auto_commit=True,
-        group_id="wikimedia-cassandra-consumer",
-        value_deserializer=lambda message: json.loads(message.decode("utf-8")),
+        auto_offset_reset=KAFKA_AUTO_OFFSET_RESET,
+        enable_auto_commit=False,
+        group_id=CASSANDRA_CONSUMER_GROUP_ID,
         consumer_timeout_ms=1000,
     )
-    print(f"[KAFKA] Escuchando topic '{TOPIC_NAME}' en {KAFKA_HOST}:{KAFKA_PORT}...")
+    print(
+        f"[KAFKA] Escuchando topic '{TOPIC_NAME}' en {KAFKA_HOST}:{KAFKA_PORT} "
+        f"| group_id={CASSANDRA_CONSUMER_GROUP_ID!r} "
+        f"| auto_offset_reset={KAFKA_AUTO_OFFSET_RESET!r}"
+    )
     return consumer
 
 
-def insert_event(session, event):
-    """Inserta un evento de Kafka en Cassandra."""
-    event_id = uuid.uuid4()
+def canonical_raw_json(event):
+    """Serializa el evento de forma estable para persistencia y fallback."""
+    return json.dumps(event, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def build_source_event_id(event, raw_json):
+    """Usa meta.id cuando exista; si no, genera un fallback estable."""
+    meta = event.get("meta") or {}
+    meta_id = meta.get("id")
+    if meta_id:
+        return str(meta_id)
+
+    return hashlib.sha1(raw_json.encode("utf-8")).hexdigest()
+
+
+def build_row(event):
+    """Valida y transforma el evento a la fila de Cassandra."""
+    if not isinstance(event, dict):
+        raise InvalidEventError("El mensaje no contiene un JSON tipo objeto.")
+
+    timestamp_event = parse_timestamp(event.get("timestamp"))
+    wiki = event.get("wiki")
+
+    if timestamp_event is None:
+        raise InvalidEventError("timestamp invalido o ausente.")
+    if not wiki:
+        raise InvalidEventError("wiki ausente.")
+
+    raw_json = canonical_raw_json(event)
+    source_event_id = build_source_event_id(event, raw_json)
+
     title = event.get("title")
     user_name = event.get("user")
     change_type = event.get("type")
-    wiki = event.get("wiki")
     bot = bool(event.get("bot", False))
     server_name = event.get("server_name")
     comment = event.get("comment")
-    timestamp_event = parse_timestamp(event.get("timestamp"))
-    parsed_date = (
-        timestamp_event.strftime("%Y-%m-%d %H:%M:%S") if timestamp_event else None
-    )
 
-    session.execute(
-        INSERT_QUERY,
-        (
-            event_id,
-            title,
-            user_name,
-            change_type,
-            wiki,
-            bot,
-            server_name,
-            comment,
-            timestamp_event,
-            parsed_date,
-        ),
-    )
+    event_date = timestamp_event.date()
+    event_hour = timestamp_event.hour
 
-    print(
-        f"[INSERT] Evento guardado | title={title!r} | user={user_name!r} | "
-        f"type={change_type!r} | wiki={wiki!r}"
+    return (
+        wiki,
+        event_date,
+        event_hour,
+        timestamp_event,
+        source_event_id,
+        title,
+        user_name,
+        change_type,
+        bot,
+        server_name,
+        comment,
+        raw_json,
     )
 
 
-def print_total_rows(session):
-    """Imprime cuántos registros hay actualmente en la tabla."""
+def decode_message_value(raw_value):
+    """Decodifica el payload de Kafka a JSON controlando errores."""
     try:
-        result = session.execute(SELECT_COUNT_QUERY)
-        total = result.one()[0]
-        print(f"[CASSANDRA] Total de registros en {TABLE_NAME}: {total}")
-    except Exception as exc:
-        print(f"[CASSANDRA] No se pudo obtener el conteo de registros: {exc}")
+        return json.loads(raw_value.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise InvalidEventError(f"payload no es JSON valido: {exc}") from exc
+
+
+def insert_with_retries(session, prepared_statement, row):
+    """Intenta insertar en Cassandra varias veces antes de fallar."""
+    for attempt in range(1, INSERT_MAX_RETRIES + 1):
+        try:
+            session.execute(prepared_statement, row)
+            return
+        except Exception as exc:
+            if attempt == INSERT_MAX_RETRIES:
+                raise
+
+            print(
+                f"[CASSANDRA] Insert fallido {attempt}/{INSERT_MAX_RETRIES}: {exc}. "
+                f"Reintentando en {INSERT_RETRY_WAIT_SECONDS} segundos..."
+            )
+            time.sleep(INSERT_RETRY_WAIT_SECONDS)
+
+
+def commit_message(consumer, message):
+    """Confirma manualmente el offset del mensaje procesado."""
+    offsets = {
+        TopicPartition(message.topic, message.partition): OffsetAndMetadata(
+            message.offset + 1, None, -1
+        )
+    }
+    consumer.commit(offsets=offsets)
 
 
 def main():
     cluster = None
     consumer = None
+    inserted_count = 0
 
     try:
         cluster, session = connect_to_cassandra()
+        prepared_statement = prepare_insert_statement(session)
         consumer = create_kafka_consumer()
 
         print("[PIPELINE] Iniciando consumo de Kafka hacia Cassandra...")
@@ -145,13 +215,32 @@ def main():
 
             for message in consumer:
                 has_messages = True
-                event = message.value
-                insert_event(session, event)
+                payload_preview = repr(message.value)
+
+                try:
+                    event = decode_message_value(message.value)
+                    row = build_row(event)
+                except InvalidEventError as exc:
+                    print(
+                        f"[SKIP] Evento invalido en offset {message.offset}: {exc} "
+                        f"| payload={payload_preview}"
+                    )
+                    commit_message(consumer, message)
+                    continue
+
+                insert_with_retries(session, prepared_statement, row)
+                commit_message(consumer, message)
+                inserted_count += 1
+
+                if inserted_count % PROGRESS_EVERY == 0:
+                    print(
+                        f"[PROGRESS] {inserted_count} eventos insertados en "
+                        f"{KEYSPACE}.{TABLE_NAME}."
+                    )
 
             if not has_messages:
                 print("[KAFKA] Esperando nuevos mensajes...")
                 time.sleep(2)
-                print_total_rows(session)
 
     except KeyboardInterrupt:
         print("\n[PIPELINE] Proceso detenido manualmente.")
