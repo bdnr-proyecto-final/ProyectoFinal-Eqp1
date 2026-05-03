@@ -1,4 +1,4 @@
-kafka-python
-cassandra-driver
-sseclient-py
-requests
+kafka-python==2.3.1
+cassandra-driver==3.30.0
+sseclient-py==1.9.0
+requests==2.32.5
