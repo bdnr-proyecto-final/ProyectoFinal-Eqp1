@@ -6,35 +6,29 @@ Proyecto enfocado en el diseño e implementación de una arquitectura de datos n
 ## Índice
 
 - [1. Descripción general del proyecto](#1-descripción-general-del-proyecto)
-
 - [2. Stream seleccionado](#2-stream-seleccionado)
-
-- [3. Arquitectura propuesta](#3-arquitectura-propuesta)
-
+- [3. Arquitectura actual del proyecto](#3-arquitectura-actual-del-proyecto)
 - [4. Tecnologías utilizadas](#4-tecnologías-utilizadas)
-
 - [5. Etapa 2: Infraestructura y configuración](#5-etapa-2-infraestructura-y-configuración)
-
 - [6. Etapa 3: Pipeline de datos en tiempo real](#6-etapa-3-pipeline-de-datos-en-tiempo-real)
-
-- [7. Cómo levantar la infraestructura](#7-cómo-levantar-la-infraestructura)
-
-- [8. Seguridad y control de accesos](#8-seguridad-y-control-de-accesos)
-
+- [7. Etapa 4: Analítica batch con Spark](#7-etapa-4-analítica-batch-con-spark)
+- [8. Cómo levantar y validar el flujo completo](#8-cómo-levantar-y-validar-el-flujo-completo)
 - [9. Descripción del stream de datos: Wikimedia RecentChange](#9-descripción-del-stream-de-datos-wikimedia-recentchange)
 
 ---
 
 ## 1. Descripción general del proyecto
-El proyecto tiene como objetivo diseñar e implementar una arquitectura de datos no relacional y distribuida de extremo a extremo, a partir de un stream de datos real. La solución contempla una capa de ingesta, una capa operativa de almacenamiento y una capa analítica para el procesamiento posterior de los eventos.
+El proyecto tiene como objetivo diseñar e implementar una arquitectura de datos no relacional de extremo a extremo a partir de un stream real de Wikimedia. La solución actual contempla una capa de ingesta, una capa operativa de almacenamiento y una capa analítica reproducible para generar agregados a partir de los eventos capturados.
+
+El estado real del repositorio corresponde a un entorno local y académico, no a una plataforma productiva de alta disponibilidad.
 
 ## 2. Stream seleccionado
-Se utilizará el stream **Wikimedia EventStreams - RecentChange**, el cual genera eventos en tiempo real sobre cambios recientes en páginas de Wikimedia.
+Se utiliza el stream **Wikimedia EventStreams - RecentChange**, que publica eventos en tiempo real sobre cambios recientes en páginas de Wikimedia.
 
-## 3. Arquitectura propuesta
+## 3. Arquitectura actual del proyecto
 El flujo general del sistema es el siguiente:
 
-Wikimedia EventStreams → Kafka → Cassandra → Spark → Consultas analíticas
+Wikimedia EventStreams → Kafka → Cassandra recent_changes_raw → Spark → CSV analítico
 
 ```mermaid
 flowchart LR
@@ -42,7 +36,7 @@ flowchart LR
     B -->|JSON Events ~3000/min| C[Apache Kafka]
     C -->|Stream Processing| D[(Apache Cassandra)]
     D -->|Query / ETL| E[Apache Spark]
-    E -->|Resultados| F[📊 Consultas analíticas]
+    E -->|Resultados| F[📊 CSV analítico]
 
     subgraph Fuente
         A
@@ -69,86 +63,163 @@ flowchart LR
 Se utiliza como capa de mensajería para recibir y desacoplar el flujo de eventos en tiempo real.
 
 ### Apache Cassandra
-Se utiliza como base de datos NoSQL de ingesta y operación, optimizada para escritura rápida, alta disponibilidad y escalabilidad horizontal.
+Se utiliza como base de datos NoSQL de ingesta y operación, optimizada para escrituras rápidas. En el estado actual del proyecto se ejecuta en un solo nodo local.
 
 ### Apache Spark
-Se utiliza como motor de procesamiento analítico para limpieza, transformación y preparación de consultas agregadas.
+Se utiliza como motor de procesamiento batch para limpieza, transformación y generación de resultados agregados reproducibles.
 
 ## 5. Etapa 2: Infraestructura y configuración
-En esta etapa se definió la infraestructura base del proyecto:
+La infraestructura actual del proyecto se ejecuta con `docker compose` e incluye:
 
-- Kafka como sistema de ingesta y buffer de eventos
-- Cassandra como capa operativa de verdad
-- Spark como capa analítica (OLAP)
-- Scripts y archivos de configuración para despliegue
-- Documentación de arquitectura y decisiones CAP
-- Archivos de ejemplo para control de accesos
+- `zookeeper`
+- `kafka`
+- `cassandra`
+- `cassandra-init`
+- `spark-master`
+- `spark-worker`
 
-## 6. Etapa 3: Pipeline de datos en tiempo real 
-En esta etapa se implemtó el flujo completo de ingestión y almacenamiento de datos en tiempo real.
+Durante esta etapa quedaron implementados estos puntos:
 
-## Flujo del sistema
+- volumen persistente para Cassandra
+- `healthcheck` del servicio `cassandra`
+- inicialización automática del schema con `cassandra-init`
+- keyspace `wikimedia`
+- tabla legacy `recent_changes` mantenida temporalmente por compatibilidad
+- tabla operativa `recent_changes_raw`
+- tabla analítica `changes_by_wiki_hour`
+
+## 6. Etapa 3: Pipeline de datos en tiempo real
+En esta etapa quedó implementado el flujo:
+
 Wikimedia → Kafka → Cassandra
 
-## Componentes
+### Componentes
 
-Productor (Wikimedia → Kafka)
-Script: consumers/wikimedia_to_kafka.py
+#### Productor: Wikimedia → Kafka
+Script: `consumers/wikimedia_to_kafka.py`
 
-* Consume eventos en tiempo real desde Wikimedia
-* Convierte a JSON
-* Envía a Kafka
+- consume eventos en tiempo real desde Wikimedia EventStreams
+- serializa los mensajes en JSON
+- publica en el topic `wikimedia.recentchange`
+- hace `flush` por lotes simples para no forzar I/O por cada evento
 
-Consumidor (Kafka → Cassandra)
-Script: consumers/kafka_to_cassandra.py
+#### Consumidor: Kafka → Cassandra
+Script: `consumers/kafka_to_cassandra.py`
 
-* Consume mensajes de Kafka
-* Transforma los datos
-* Inserta en Cassandra
+- consume mensajes de Kafka con `enable_auto_commit=False`
+- usa `group_id` y `auto_offset_reset` configurables por variables de entorno
+- transforma cada evento al modelo de `wikimedia.recent_changes_raw`
+- usa prepared statements para Cassandra
+- deriva `event_date` y `event_hour` a partir de `timestamp_event`
+- hace commit manual del offset solo cuando el mensaje fue procesado
+- si un mensaje es inválido, lo registra como `SKIP`, hace commit del offset y continúa
+- si Cassandra falla al insertar, reintenta y no hace commit del offset si no logra persistir
 
-## Ejecución del Pipeline:
+## 7. Etapa 4: Analítica batch con Spark
+En esta etapa se implementó un job Spark real para procesar los datos persistidos en Cassandra.
 
-docker compose up -d
+#### Job analítico
+Script principal: `spark/jobs/recent_changes_analytics.py`
 
-python consumers/wikimedia_to_kafka.py y python consumers/kafka_to_cassandra.py en terminales diferentes
- 
-docker exec cassandra cqlsh -e "SELECT COUNT(*) FROM wikimedia.recent_changes;"
+- lee desde `wikimedia.recent_changes_raw`
+- elimina filas con `timestamp_event`, `wiki`, `event_date` o `event_hour` nulos
+- agrupa por `event_date`, `wiki`, `event_hour` y `change_type`
+- calcula `total_events`
+- calcula `bot_events`
+- genera archivos CSV en `spark/output/changes_by_wiki_hour`
+- imprime cuántas filas leyó, cuántas sobrevivieron a la limpieza y cuántas filas agregadas produjo
 
-## 7. Cómo levantar la infraestructura:
+#### Ejecución del job
+Script de apoyo: `scripts/run_analytics.sh`
 
-docker compose up -d
+- copia el job al contenedor `spark-master-proyectoFinal`
+- ejecuta `spark-submit`
+- descarga al host el directorio completo de salida generado por Spark
 
-## 8. Seguridad y control de accesos
-Para la etapa 2 se incluye un archivo `roles.cql` que documenta la estrategia de control de accesos en Cassandra mediante roles y permisos.
+La escritura opcional de agregados a `wikimedia.changes_by_wiki_hour` existe, pero se mantiene desactivada por defecto. Si se habilita, debe considerarse experimental y no idempotente.
 
-Debido a que el contenedor base de Cassandra se encuentra en configuración por defecto, la autenticación por usuario/contraseña no está habilitada todavía. Por ello, los roles se incluyen como parte de la documentación de seguridad y como base para una configuración futura más estricta.
+## 8. Cómo levantar y validar el flujo completo
 
-De igual forma, el archivo `kafka/acl.sh` documenta la estrategia de control de accesos para Kafka mediante ACLs en un entorno con seguridad habilitada.
+### 8.1 Levantar infraestructura
 
-## Decisiones basadas en el teorema CAP
+```bash
+docker compose up -d zookeeper kafka cassandra cassandra-init spark-master spark-worker
+```
 
-La arquitectura del proyecto fue diseñada considerando el teorema CAP, el cual establece que en un sistema distribuido no es posible garantizar simultáneamente Consistencia (C), Disponibilidad (A) y Tolerancia a Particiones (P).
+### 8.2 Correr productor y consumer
 
-En este caso, se priorizan:
+En terminales separadas:
 
-- **Disponibilidad (A)**
-- **Tolerancia a Particiones (P)**
+```bash
+python3 consumers/wikimedia_to_kafka.py
+```
 
-### Justificación
+```bash
+python3 consumers/kafka_to_cassandra.py
+```
 
-Dado que el sistema procesa eventos en tiempo real provenientes de un stream externo (Wikimedia EventStreams), es fundamental que el sistema continúe operando incluso ante fallos parciales de red o de nodos.
+### 8.3 Validar datos en Cassandra
 
-Para ello, se eligió Apache Cassandra como base de datos NoSQL, ya que está diseñada para entornos distribuidos y permite mantener alta disponibilidad mediante replicación, aceptando un modelo de **consistencia eventual**.
+Verificar que la tabla raw ya recibe eventos:
 
-Esto implica que:
+```bash
+docker exec cassandra cqlsh -e "SELECT event_date, wiki, event_hour, timestamp_event, source_event_id, title FROM wikimedia.recent_changes_raw LIMIT 10;"
+```
 
-- El sistema puede seguir recibiendo y almacenando eventos aunque existan fallos parciales.
-- No se requiere consistencia inmediata para cada evento.
-- La consolidación y análisis estructurado de los datos se realiza posteriormente en la capa analítica (Apache Spark).
+Consulta rápida de conteo:
 
-### Conclusión
+```bash
+docker exec cassandra cqlsh -e "SELECT COUNT(*) FROM wikimedia.recent_changes_raw;"
+```
 
-La elección de priorizar AP (Availability + Partition Tolerance) se alinea con la naturaleza distribuida y en tiempo real del proyecto, permitiendo garantizar continuidad operativa y escalabilidad.
+### 8.4 Correr analytics
+
+```bash
+bash scripts/run_analytics.sh
+```
+
+### 8.5 Revisar la salida generada
+
+```bash
+ls -R spark/output/changes_by_wiki_hour
+```
+
+```bash
+head -n 20 spark/output/changes_by_wiki_hour/part-*.csv
+```
+
+### 8.6 Seguridad y control de accesos
+El repositorio incluye `cassandra/roles.cql` y `kafka/acl.sh` como documentación base de una estrategia de seguridad futura.
+
+Sin embargo, en el entorno actual:
+
+- Cassandra corre con la configuración por defecto del contenedor
+- no hay autenticación habilitada en runtime
+- no hay ACLs activas de Kafka en ejecución
+
+Por lo tanto, esta seguridad es documental y no una característica operativa del despliegue actual.
+
+### 8.7 Limitaciones del entorno local académico
+El proyecto actual debe entenderse como una implementación académica, funcional y reproducible, pero no como una plataforma distribuida productiva.
+
+Limitaciones principales:
+
+- Kafka corre con un solo broker
+- Cassandra corre con un solo nodo
+- no existe alta disponibilidad real ni failover automático
+- no se demuestra particionado real entre nodos
+- no hay seguridad enterprise habilitada en ejecución
+- Spark se usa como job batch analítico, no como motor principal de streaming
+- no hay orquestación externa tipo Airflow ni scheduling de pipelines
+
+### 8.8 Decisiones CAP
+La justificación CAP del proyecto se documenta con más detalle en `docs/decisiones_cap.md`.
+
+En síntesis:
+
+- a nivel conceptual, el diseño privilegia disponibilidad y tolerancia a particiones
+- a nivel práctico, este repositorio corre en entorno local mononodo, por lo que no demuestra alta disponibilidad real
+- Spark consolida el análisis de manera posterior sobre datos ya persistidos
 
 ## 9. Descripción del stream de datos: Wikimedia RecentChange
 
