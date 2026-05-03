@@ -19,7 +19,9 @@ USER_AGENT = os.getenv(
     "USER_AGENT",
     "ProyectoFinal-Eqp1/1.0 (contacto: equipo1@itam.mx)",
 )
-FLUSH_EVERY = int(os.getenv("KAFKA_FLUSH_EVERY", "100"))
+FLUSH_EVERY = max(1, int(os.getenv("KAFKA_FLUSH_EVERY", "100")))
+SSE_BACKOFF_START_SECONDS = float(os.getenv("SSE_BACKOFF_START_SECONDS", "1"))
+SSE_BACKOFF_MAX_SECONDS = float(os.getenv("SSE_BACKOFF_MAX_SECONDS", "30"))
 
 HEADERS = {
     "User-Agent": USER_AGENT,
@@ -47,7 +49,7 @@ def create_producer(max_retries=10, wait_seconds=5):
     raise ConnectionError("No fue posible conectarse a Kafka.")
 
 
-def stream_events():
+def open_sse_stream():
     print(f"[WIKIMEDIA] Conectando a {STREAM_URL} ...")
     print(f"[WIKIMEDIA] User-Agent usado: {USER_AGENT}")
 
@@ -58,47 +60,75 @@ def stream_events():
         headers=HEADERS,
     )
     response.raise_for_status()
-    return SSEClient(response)
+    return response, SSEClient(response)
 
 
 def main():
     producer = None
     sent_count = 0
+    backoff_seconds = SSE_BACKOFF_START_SECONDS
 
     try:
         producer = create_producer()
-        client = stream_events()
 
         print("[PIPELINE] Iniciando flujo Wikimedia → Kafka...")
 
-        for event in client.events():
-            if not event.data:
-                continue
-
+        while True:
+            response = None
             try:
-                payload = json.loads(event.data)
+                response, client = open_sse_stream()
+                backoff_seconds = SSE_BACKOFF_START_SECONDS
 
-                if not isinstance(payload, dict):
-                    continue
+                for event in client.events():
+                    if not event.data:
+                        continue
 
-                if payload.get("meta", {}).get("domain") == "canary":
-                    continue
+                    try:
+                        payload = json.loads(event.data)
 
-                producer.send(TOPIC_NAME, payload)
-                sent_count += 1
+                        if not isinstance(payload, dict):
+                            continue
 
-                if sent_count % FLUSH_EVERY == 0:
-                    producer.flush()
-                    print(
-                        f"[SEND] {sent_count} eventos enviados | "
-                        f"ultimo_title={payload.get('title')!r} | "
-                        f"ultimo_type={payload.get('type')!r}"
-                    )
+                        if payload.get("meta", {}).get("domain") == "canary":
+                            continue
 
-            except json.JSONDecodeError:
-                print("[WARN] Evento recibido no es JSON válido.")
+                        producer.send(TOPIC_NAME, payload)
+                        sent_count += 1
+
+                        if sent_count % FLUSH_EVERY == 0:
+                            producer.flush()
+                            print(
+                                f"[SEND] {sent_count} eventos enviados | "
+                                f"ultimo_title={payload.get('title')!r} | "
+                                f"ultimo_type={payload.get('type')!r}"
+                            )
+
+                    except json.JSONDecodeError:
+                        print("[WARN] Evento recibido no es JSON válido.")
+                    except Exception as exc:
+                        print(f"[ERROR] No se pudo enviar el evento a Kafka: {exc}")
+
+            except KeyboardInterrupt:
+                raise
             except Exception as exc:
-                print(f"[ERROR] No se pudo enviar el evento a Kafka: {exc}")
+                if producer is not None:
+                    try:
+                        producer.flush()
+                    except Exception as flush_exc:
+                        print(
+                            f"[KAFKA] Flush fallido tras error SSE ({flush_exc}). "
+                            "Continuando con reconexion..."
+                        )
+
+                print(
+                    f"[WIKIMEDIA] Stream interrumpido ({type(exc).__name__}: {exc}). "
+                    f"Reintentando en {backoff_seconds}s..."
+                )
+                time.sleep(backoff_seconds)
+                backoff_seconds = min(backoff_seconds * 2, SSE_BACKOFF_MAX_SECONDS)
+            finally:
+                if response is not None:
+                    response.close()
 
     except KeyboardInterrupt:
         print("\n[PIPELINE] Proceso detenido manualmente.")
