@@ -223,6 +223,19 @@ En síntesis:
 
 ## 9. Descripción del stream de datos: Wikimedia RecentChange
 
+### 9.0 Enlaces a APIs y documentación oficial
+
+| Recurso | URL |
+|---|---|
+| Endpoint del stream (SSE) | https://stream.wikimedia.org/v2/stream/recentchange |
+| Documentación EventStreams | https://wikitech.wikimedia.org/wiki/Event_Platform/EventStreams |
+| Catálogo de streams disponibles | https://stream.wikimedia.org/?doc |
+| Esquema JSON `mediawiki/recentchange` | https://schema.wikimedia.org/#!/primary/jsonschema/mediawiki/recentchange |
+| Documentación de MediaWiki RecentChanges | https://www.mediawiki.org/wiki/Manual:RCFeed |
+| Política de uso de la API | https://api.wikimedia.org/wiki/Documentation/Policies/User-Agent |
+
+> El stream se consume por HTTP/SSE sin autenticación, pero la política de Wikimedia exige enviar un `User-Agent` identificable; el productor lo configura vía la variable `USER_AGENT` (`consumers/wikimedia_to_kafka.py`).
+
 ### 9.1 Resumen
 El stream `recentchange` es un flujo de datos en tiempo real que transmite todos los cambios realizados en los proyectos de Wikimedia, como Wikipedia, Wikidata, Wikimedia Commons y otros. Cada evento representa una acción que ocurre en una página: por ejemplo, una edición, creación de página, categorización o registro de acciones administrativas.
 
