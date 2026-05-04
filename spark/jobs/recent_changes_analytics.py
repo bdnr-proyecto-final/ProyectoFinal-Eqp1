@@ -37,16 +37,20 @@ def main():
     )
     raw_count = raw_df.count()
 
-    cleaned_df = raw_df.dropna(
-        subset=["timestamp_event", "wiki", "event_date", "event_hour"]
+    cleaned_df = (
+        raw_df.dropna(subset=["timestamp_event", "wiki"])
+        .withColumn("event_date", F.to_date(F.col("timestamp_event")))
+        .withColumn("event_hour", F.hour(F.col("timestamp_event")))
+        .withColumnRenamed("type", "change_type")
     )
     cleaned_count = cleaned_df.count()
 
+    cleaned_df = cleaned_df.dropna(subset=["event_date", "event_hour", "change_type"])
     aggregated_df = (
         cleaned_df.groupBy("event_date", "wiki", "event_hour", "change_type")
         .agg(
             F.count(F.lit(1)).alias("total_events"),
-            F.sum(F.when(F.col("bot") == True, F.lit(1)).otherwise(F.lit(0))).alias(
+            F.sum(F.when(F.col("bot") == F.lit(True), F.lit(1)).otherwise(F.lit(0))).alias(
                 "bot_events"
             ),
         )

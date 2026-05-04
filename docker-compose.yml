@@ -61,6 +61,8 @@ services:
     ports:
       - "7077:7077"
       - "8080:8080"
+    volumes:
+      - ./spark/jobs:/opt/spark/jobs
 
   spark-worker:
     image: apache/spark:4.0.2
